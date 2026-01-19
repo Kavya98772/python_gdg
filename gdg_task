@@ -1,0 +1,93 @@
+import socket
+
+# ==== CONFIG - edit these ====
+SERVER  = "irc.libera.chat"
+PORT    = 6667
+NICK    = "simpleClient123"
+CHANNEL = "#testchannel"
+# =============================
+
+def send_line(sock, line):
+    sock.sendall((line + "\r\n").encode("utf-8"))
+
+def main():
+    # 1. Connect
+    irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    irc.connect((SERVER, PORT))
+    print(f"Connected to {SERVER}:{PORT}")
+
+    # 2. Handshake
+    send_line(irc, f"NICK {NICK}")
+    send_line(irc, f"USER {NICK} 0 * :Simple IRC Client")
+
+    joined_channel = False
+    current_channel = CHANNEL
+    buffer = ""
+
+    print("Type messages to send to the channel.")
+    print("Use /join #channel to change channel, /quit to exit.\n")
+
+    while True:
+        # 3. Read from server
+        try:
+            data = irc.recv(4096)
+        except OSError:
+            print("Connection closed.")
+            break
+
+        if not data:
+            print("Server disconnected.")
+            break
+
+        buffer += data.decode("utf-8", errors="ignore")
+
+        # Handle full lines from server
+        while "\r\n" in buffer:
+            line, buffer = buffer.split("\r\n", 1)
+            if not line:
+                continue
+
+            print("SERVER:", line)
+
+            # PING -> PONG
+            if line.startswith("PING"):
+                # line like: "PING :token"
+                token = line.split(" ", 1)[1]
+                send_line(irc, f"PONG {token}")
+                continue
+
+            # If we see 001 (welcome), then join the default channel once
+            if " 001 " in line and not joined_channel:
+                send_line(irc, f"JOIN {current_channel}")
+                joined_channel = True
+                print(f"Joined {current_channel}")
+
+        # 4. Read from user (blocking simple version)
+        try:
+            user_input = input()
+        except EOFError:
+            send_line(irc, "QUIT :EOF")
+            break
+
+        if user_input.startswith("/quit"):
+            send_line(irc, "QUIT :Bye")
+            break
+        elif user_input.startswith("/join"):
+            parts = user_input.split()
+            if len(parts) == 2:
+                ch = parts[1]
+                send_line(irc, f"JOIN {ch}")
+                current_channel = ch
+                joined_channel = True
+            else:
+                print("Usage: /join #channel")
+        else:
+            if not joined_channel:
+                print("Not in a channel yet.")
+            else:
+                send_line(irc, f"PRIVMSG {current_channel} :{user_input}")
+
+    irc.close()
+
+if __name__ == "__main__":
+    main()
